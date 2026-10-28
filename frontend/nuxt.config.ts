@@ -5,6 +5,9 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: ['shadcn-nuxt'],
   css: ['~/assets/css/tailwind.css'],
+  nitro: {
+    experimental: { websocket: true },
+  },
   vite: {
     plugins: [tailwindcss()],
   },
