@@ -1,5 +1,8 @@
 import type { BoardObject, ObjectTemplate, Rect, StyleChanges, TextObject } from '~/types/canvas-object'
 
+const API = 'http://localhost:3001/objects'
+const RECT_THROTTLE_MS = 300
+
 const TEXT_DEFAULTS = { text: '', fontSize: FONT_SIZES.M, bold: false }
 
 // Starting attributes of a new object, per variant. Only variants with text get text attributes.
@@ -9,34 +12,66 @@ const DEFAULTS: Record<BoardObject['type'], Rect & Partial<TextObject>> = {
   'circle': { x: 0, y: 0, width: GRID_SIZE * 6, height: GRID_SIZE * 6 },
 }
 
+// Per object being dragged or resized: whether another change came in during the current pause.
+const rectThrottles = new Map<string, { pending: boolean }>()
+
 // The board state is the single source of truth for which objects exist and what they look like.
 // Components only read it; every change goes through one of the functions below.
 export function useBoard() {
-  const objects = useState<BoardObject[]>('objects', () => [
-    { id: 'note-1', type: 'sticky-note', x: 120, y: 120, width: 192, height: 192, text: 'Hello, board!', color: 'yellow', fontSize: FONT_SIZES.M, bold: false },
-    { id: 'note-2', type: 'sticky-note', x: 360, y: 120, width: 192, height: 192, text: 'Drag me around', color: 'pink', fontSize: FONT_SIZES.M, bold: false },
-    { id: 'text-1', type: 'text', x: 600, y: 120, width: 240, height: 72, text: 'Just some text', fontSize: FONT_SIZES.M, bold: false },
-    { id: 'circle-1', type: 'circle', x: 600, y: 240, width: 144, height: 144, color: 'blue' },
-  ])
+  const objects = useState<BoardObject[]>('objects', () => [])
+
+  callOnce('board', async () => {
+    objects.value = await $fetch<BoardObject[]>(API)
+  })
+
+  // Every function changes the local state first and then tells the backend, without waiting for it.
+  function create(object: BoardObject) {
+    objects.value = [...objects.value, object]
+    $fetch(API, { method: 'POST', body: object })
+  }
+
+  function patch(id: string, changes: object) {
+    $fetch(`${API}/${id}`, { method: 'PATCH', body: changes })
+  }
+
+  // Sends the current rect at once, then pauses. Changes during the pause are sent together when it ends.
+  function patchRect(id: string) {
+    const throttle = rectThrottles.get(id)
+    if (throttle) {
+      throttle.pending = true
+      return
+    }
+    const object = objects.value.find(object => object.id === id)
+    if (!object) return
+    const { x, y, width, height } = object
+    patch(id, { x, y, width, height })
+    const pause = { pending: false }
+    rectThrottles.set(id, pause)
+    setTimeout(() => {
+      rectThrottles.delete(id)
+      if (pause.pending) patchRect(id)
+    }, RECT_THROTTLE_MS)
+  }
 
   function addObject(template: ObjectTemplate, centerX: number, centerY: number) {
     const defaults = DEFAULTS[template.type]
     const id = crypto.randomUUID()
     const x = snapToGrid(centerX - defaults.width / 2)
     const y = snapToGrid(centerY - defaults.height / 2)
-    objects.value = [...objects.value, { ...defaults, ...template, id, x, y } as BoardObject]
+    create({ ...defaults, ...template, id, x, y } as BoardObject)
     return id
   }
 
   // Works for every variant: the copy keeps all attributes except the id.
   function addCopy(source: BoardObject) {
     const id = crypto.randomUUID()
-    objects.value = [...objects.value, { ...source, id }]
+    create({ ...source, id })
     return id
   }
 
   function removeObject(id: string) {
     objects.value = objects.value.filter(object => object.id !== id)
+    $fetch(`${API}/${id}`, { method: 'DELETE' })
   }
 
   function updateObject(id: string, changes: Partial<Rect> & StyleChanges & { text?: string }) {
@@ -45,18 +80,22 @@ export function useBoard() {
 
   function moveObject(id: string, x: number, y: number) {
     updateObject(id, { x, y })
+    patchRect(id)
   }
 
   function resizeObject(id: string, rect: Rect) {
     updateObject(id, rect)
+    patchRect(id)
   }
 
   function updateText(id: string, text: string) {
     updateObject(id, { text })
+    patch(id, { text })
   }
 
   function updateStyle(id: string, changes: StyleChanges) {
     updateObject(id, changes)
+    patch(id, changes)
   }
 
   return { objects: readonly(objects), addObject, addCopy, removeObject, moveObject, resizeObject, updateText, updateStyle }
