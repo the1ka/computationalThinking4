@@ -22,14 +22,16 @@ const pendingChanges = new Map<string, { changes: ObjectChanges; timer: ReturnTy
 export function useBoard() {
   const api = $fetch.create({ baseURL: useRuntimeConfig().public.apiBase })
   const objects = useState<BoardObject[]>('objects', () => [])
+  const boardId = useState<string | null>('boardId', () => null)
 
-  async function load() {
-    objects.value = await api<BoardObject[]>('/objects')
+  async function load(id: string) {
+    boardId.value = id
+    objects.value = await api<BoardObject[]>(`/boards/${id}/objects`)
   }
 
   function insert(object: BoardObject) {
     objects.value = [...objects.value, object]
-    api('/objects', { method: 'POST', body: object })
+    api(`/boards/${boardId.value}/objects`, { method: 'POST', body: object })
   }
 
   function addObject(template: ObjectTemplate, centerX: number, centerY: number) {
@@ -88,5 +90,5 @@ export function useBoard() {
     updateObject(id, changes)
   }
 
-  return { objects: readonly(objects), load, addObject, addCopy, removeObject, moveObject, resizeObject, updateText, updateStyle }
+  return { objects: readonly(objects), boardId: readonly(boardId), load, addObject, addCopy, removeObject, moveObject, resizeObject, updateText, updateStyle }
 }

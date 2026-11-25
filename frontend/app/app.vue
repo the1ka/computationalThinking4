@@ -10,7 +10,8 @@ const VARIANTS: Record<BoardObject['type'], Component> = {
   'circle': CircleShape,
 }
 
-const { objects, load, addObject, resizeObject, updateText, updateStyle } = useBoard()
+const { objects, boardId, addObject, resizeObject, updateText, updateStyle } = useBoard()
+const { load } = useBoards()
 await callOnce(load)
 
 // Local UI state of this user; it is not part of the shared board state.
@@ -18,6 +19,12 @@ const scale = ref(1)
 const offset = ref({ x: 0, y: 0 })
 const selectedId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
+
+// Selection and editing belong to the open board, so switching boards clears them.
+watch(boardId, () => {
+  selectedId.value = null
+  editingId.value = null
+})
 
 const gesture = useObjectGesture(scale)
 useShortcuts(selectedId, editingId)
@@ -75,4 +82,5 @@ function onEdit(object: BoardObject) {
     @change="changes => updateStyle(selectedObject!.id, changes)"
   />
   <ObjectToolbar @add="onAdd" />
+  <BoardMenu />
 </template>
